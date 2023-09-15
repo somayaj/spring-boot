@@ -22,7 +22,6 @@ import java.nio.file.Files;
 import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
@@ -45,9 +44,12 @@ import org.gradle.api.Task;
 import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.FileTree;
+import org.gradle.api.provider.ListProperty;
 import org.gradle.api.tasks.IgnoreEmptyDirectories;
+import org.gradle.api.tasks.Input;
 import org.gradle.api.tasks.InputFiles;
 import org.gradle.api.tasks.Internal;
+import org.gradle.api.tasks.Optional;
 import org.gradle.api.tasks.OutputDirectory;
 import org.gradle.api.tasks.PathSensitive;
 import org.gradle.api.tasks.PathSensitivity;
@@ -65,18 +67,23 @@ public abstract class ArchitectureCheck extends DefaultTask {
 
 	public ArchitectureCheck() {
 		getOutputDirectory().convention(getProject().getLayout().getBuildDirectory().dir(getName()));
+		getRules().addAll(allPackagesShouldBeFreeOfTangles(),
+				allBeanPostProcessorBeanMethodsShouldBeStaticAndHaveParametersThatWillNotCausePrematureInitialization(),
+				allBeanFactoryPostProcessorBeanMethodsShouldBeStaticAndHaveNoParameters(),
+				noClassesShouldCallStepVerifierStepVerifyComplete(),
+				noClassesShouldConfigureDefaultStepVerifierTimeout(), noClassesShouldCallCollectorsToList());
+		getRuleDescriptions().set(getRules().map((rules) -> rules.stream().map(ArchRule::getDescription).toList()));
 	}
 
 	@TaskAction
 	void checkArchitecture() throws IOException {
 		JavaClasses javaClasses = new ClassFileImporter()
-			.importPaths(this.classes.getFiles().stream().map(File::toPath).collect(Collectors.toList()));
-		List<EvaluationResult> violations = Stream.of(allPackagesShouldBeFreeOfTangles(),
-				allBeanPostProcessorBeanMethodsShouldBeStaticAndHaveParametersThatWillNotCausePrematureInitialization(),
-				allBeanFactoryPostProcessorBeanMethodsShouldBeStaticAndHaveNoParameters())
+			.importPaths(this.classes.getFiles().stream().map(File::toPath).toList());
+		List<EvaluationResult> violations = getRules().get()
+			.stream()
 			.map((rule) -> rule.evaluate(javaClasses))
 			.filter(EvaluationResult::hasViolation)
-			.collect(Collectors.toList());
+			.toList();
 		File outputFile = getOutputDirectory().file("failure-report.txt").get().getAsFile();
 		outputFile.getParentFile().mkdirs();
 		if (!violations.isEmpty()) {
@@ -162,6 +169,27 @@ public abstract class ArchitectureCheck extends DefaultTask {
 		};
 	}
 
+	private ArchRule noClassesShouldCallStepVerifierStepVerifyComplete() {
+		return ArchRuleDefinition.noClasses()
+			.should()
+			.callMethod("reactor.test.StepVerifier$Step", "verifyComplete")
+			.because("it can block indefinitely and expectComplete().verify(Duration) should be used instead");
+	}
+
+	private ArchRule noClassesShouldConfigureDefaultStepVerifierTimeout() {
+		return ArchRuleDefinition.noClasses()
+			.should()
+			.callMethod("reactor.test.StepVerifier", "setDefaultTimeout", "java.time.Duration")
+			.because("expectComplete().verify(Duration) should be used instead");
+	}
+
+	private ArchRule noClassesShouldCallCollectorsToList() {
+		return ArchRuleDefinition.noClasses()
+			.should()
+			.callMethod(Collectors.class, "toList")
+			.because("java.util.stream.Stream.toList() should be used instead");
+	}
+
 	public void setClasses(FileCollection classes) {
 		this.classes = classes;
 	}
@@ -179,7 +207,20 @@ public abstract class ArchitectureCheck extends DefaultTask {
 		return this.classes.getAsFileTree();
 	}
 
+	@Optional
+	@InputFiles
+	@PathSensitive(PathSensitivity.RELATIVE)
+	public abstract DirectoryProperty getResourcesDirectory();
+
 	@OutputDirectory
 	public abstract DirectoryProperty getOutputDirectory();
+
+	@Internal
+	public abstract ListProperty<ArchRule> getRules();
+
+	@Input
+	// The rules themselves can't be an input as they aren't serializable so we use their
+	// descriptions instead
+	abstract ListProperty<String> getRuleDescriptions();
 
 }

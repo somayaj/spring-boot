@@ -37,6 +37,7 @@ import org.apache.commons.compress.utils.IOUtils;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.TaskOutcome;
 import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 
 import org.springframework.boot.buildpack.platform.docker.DockerApi;
@@ -50,6 +51,7 @@ import org.springframework.boot.gradle.junit.GradleCompatibility;
 import org.springframework.boot.testsupport.gradle.testkit.GradleBuild;
 import org.springframework.boot.testsupport.junit.DisabledOnOs;
 import org.springframework.boot.testsupport.testcontainers.DisabledIfDockerUnavailable;
+import org.springframework.util.FileSystemUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -295,6 +297,28 @@ class BootBuildImageIntegrationTests {
 		assertThat(result.getOutput()).contains("---> Test Info buildpack done");
 		removeImages(projectName);
 		deleteVolumes("cache-" + projectName + ".build", "cache-" + projectName + ".launch");
+	}
+
+	@TestTemplate
+	@EnabledOnOs(value = OS.LINUX, disabledReason = "Works with Docker Engine on Linux but is not reliable with "
+			+ "Docker Desktop on other OSs")
+	void buildsImageWithBindCaches() throws IOException {
+		writeMainClass();
+		writeLongNameResource();
+		BuildResult result = this.gradleBuild.build("bootBuildImage");
+		String projectName = this.gradleBuild.getProjectDir().getName();
+		assertThat(result.task(":bootBuildImage").getOutcome()).isEqualTo(TaskOutcome.SUCCESS);
+		assertThat(result.getOutput()).contains("docker.io/library/" + projectName);
+		assertThat(result.getOutput()).contains("---> Test Info buildpack building");
+		assertThat(result.getOutput()).contains("---> Test Info buildpack done");
+		removeImages(projectName);
+		String tempDir = System.getProperty("java.io.tmpdir");
+		Path buildCachePath = Paths.get(tempDir, "junit-image-cache-" + projectName + "-build");
+		Path launchCachePath = Paths.get(tempDir, "junit-image-cache-" + projectName + "-launch");
+		assertThat(buildCachePath).exists().isDirectory();
+		assertThat(launchCachePath).exists().isDirectory();
+		FileSystemUtils.deleteRecursively(buildCachePath);
+		FileSystemUtils.deleteRecursively(launchCachePath);
 	}
 
 	@TestTemplate

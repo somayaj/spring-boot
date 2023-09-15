@@ -120,11 +120,6 @@ class TomcatServletWebServerFactoryTests extends AbstractServletWebServerFactory
 		Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
 	}
 
-	@Override
-	protected boolean isCookieCommentSupported() {
-		return false;
-	}
-
 	// JMX MBean names clash if you get more than one Engine with the same name...
 	@Test
 	void tomcatEngineNames() {
@@ -345,10 +340,10 @@ class TomcatServletWebServerFactoryTests extends AbstractServletWebServerFactory
 	}
 
 	@Test
-	void stopCalledWithoutStart() {
+	void destroyCalledWithoutStart() {
 		TomcatServletWebServerFactory factory = getFactory();
 		this.webServer = factory.getWebServer(exampleServletRegistration());
-		this.webServer.stop();
+		this.webServer.destroy();
 		Tomcat tomcat = ((TomcatWebServer) this.webServer).getTomcat();
 		assertThat(tomcat.getServer().getState()).isSameAs(LifecycleState.DESTROYED);
 	}
@@ -692,6 +687,11 @@ class TomcatServletWebServerFactoryTests extends AbstractServletWebServerFactory
 	protected void handleExceptionCausedByBlockedPortOnSecondaryConnector(RuntimeException ex, int blockedPort) {
 		assertThat(ex).isInstanceOf(ConnectorStartFailedException.class);
 		assertThat(((ConnectorStartFailedException) ex).getPort()).isEqualTo(blockedPort);
+	}
+
+	@Override
+	protected String startedLogMessage() {
+		return ((TomcatWebServer) this.webServer).getStartedLogMessage();
 	}
 
 }

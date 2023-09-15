@@ -34,6 +34,10 @@ import org.springframework.aot.hint.predicate.RuntimeHintsPredicates;
 import org.springframework.boot.context.properties.BoundConfigurationProperties;
 import org.springframework.boot.context.properties.ConfigurationPropertiesBean;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
+import org.springframework.boot.context.properties.bind.BindableRuntimeHintsRegistrarTests.BaseProperties.InheritedNested;
+import org.springframework.boot.context.properties.bind.BindableRuntimeHintsRegistrarTests.ComplexNestedProperties.ListenerRetry;
+import org.springframework.boot.context.properties.bind.BindableRuntimeHintsRegistrarTests.ComplexNestedProperties.Retry;
+import org.springframework.boot.context.properties.bind.BindableRuntimeHintsRegistrarTests.ComplexNestedProperties.Simple;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.EnvironmentAware;
@@ -75,7 +79,7 @@ class BindableRuntimeHintsRegistrarTests {
 	@Test
 	void registerHintsWhenNoClasses() {
 		RuntimeHints runtimeHints = new RuntimeHints();
-		BindableRuntimeHintsRegistrar registrar = new BindableRuntimeHintsRegistrar();
+		BindableRuntimeHintsRegistrar registrar = new BindableRuntimeHintsRegistrar(new Class<?>[0]);
 		registrar.registerHints(runtimeHints);
 		assertThat(runtimeHints.reflection().typeHints()).isEmpty();
 	}
@@ -241,6 +245,38 @@ class BindableRuntimeHintsRegistrarTests {
 		assertThat(runtimeHints.reflection().typeHints()).singleElement()
 			.satisfies(javaBeanBinding(PackagePrivateGettersAndSetters.class, "getAlpha", "setAlpha", "getBravo",
 					"setBravo"));
+	}
+
+	@Test
+	void registerHintsWhenHasInheritedNestedProperties() {
+		RuntimeHints runtimeHints = registerHints(ExtendingProperties.class);
+		assertThat(runtimeHints.reflection().typeHints()).hasSize(3);
+		assertThat(runtimeHints.reflection().getTypeHint(BaseProperties.class)).satisfies((entry) -> {
+			assertThat(entry.getMemberCategories()).isEmpty();
+			assertThat(entry.methods()).extracting(ExecutableHint::getName)
+				.containsExactlyInAnyOrder("getInheritedNested", "setInheritedNested");
+		});
+		assertThat(runtimeHints.reflection().getTypeHint(ExtendingProperties.class))
+			.satisfies(javaBeanBinding(ExtendingProperties.class, "getBravo", "setBravo"));
+		assertThat(runtimeHints.reflection().getTypeHint(InheritedNested.class))
+			.satisfies(javaBeanBinding(InheritedNested.class, "getAlpha", "setAlpha"));
+	}
+
+	@Test
+	void registerHintsWhenHasComplexNestedProperties() {
+		RuntimeHints runtimeHints = registerHints(ComplexNestedProperties.class);
+		assertThat(runtimeHints.reflection().typeHints()).hasSize(4);
+		assertThat(runtimeHints.reflection().getTypeHint(Retry.class)).satisfies((entry) -> {
+			assertThat(entry.getMemberCategories()).isEmpty();
+			assertThat(entry.methods()).extracting(ExecutableHint::getName)
+				.containsExactlyInAnyOrder("getCount", "setCount");
+		});
+		assertThat(runtimeHints.reflection().getTypeHint(ListenerRetry.class))
+			.satisfies(javaBeanBinding(ListenerRetry.class, "isStateless", "setStateless"));
+		assertThat(runtimeHints.reflection().getTypeHint(Simple.class))
+			.satisfies(javaBeanBinding(Simple.class, "getRetry"));
+		assertThat(runtimeHints.reflection().getTypeHint(ComplexNestedProperties.class))
+			.satisfies(javaBeanBinding(ComplexNestedProperties.class, "getSimple"));
 	}
 
 	private Consumer<TypeHint> javaBeanBinding(Class<?> type, String... expectedMethods) {
@@ -659,6 +695,96 @@ class BindableRuntimeHintsRegistrarTests {
 					this.field = field;
 				}
 
+			}
+
+		}
+
+	}
+
+	public abstract static class BaseProperties {
+
+		private InheritedNested inheritedNested;
+
+		public InheritedNested getInheritedNested() {
+			return this.inheritedNested;
+		}
+
+		public void setInheritedNested(InheritedNested inheritedNested) {
+			this.inheritedNested = inheritedNested;
+		}
+
+		public static class InheritedNested {
+
+			private String alpha;
+
+			public String getAlpha() {
+				return this.alpha;
+			}
+
+			public void setAlpha(String alpha) {
+				this.alpha = alpha;
+			}
+
+		}
+
+	}
+
+	public static class ExtendingProperties extends BaseProperties {
+
+		private String bravo;
+
+		public String getBravo() {
+			return this.bravo;
+		}
+
+		public void setBravo(String bravo) {
+			this.bravo = bravo;
+		}
+
+	}
+
+	public static class ComplexNestedProperties {
+
+		private final Simple simple = new Simple();
+
+		public Simple getSimple() {
+			return this.simple;
+		}
+
+		public static class Simple {
+
+			private final ListenerRetry retry = new ListenerRetry();
+
+			public ListenerRetry getRetry() {
+				return this.retry;
+			}
+
+		}
+
+		public abstract static class Retry {
+
+			private int count = 5;
+
+			public int getCount() {
+				return this.count;
+			}
+
+			public void setCount(int count) {
+				this.count = count;
+			}
+
+		}
+
+		public static class ListenerRetry extends Retry {
+
+			private boolean stateless;
+
+			public boolean isStateless() {
+				return this.stateless;
+			}
+
+			public void setStateless(boolean stateless) {
+				this.stateless = stateless;
 			}
 
 		}

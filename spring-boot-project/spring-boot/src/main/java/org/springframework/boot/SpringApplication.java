@@ -30,6 +30,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 import org.apache.commons.logging.Log;
@@ -295,6 +296,9 @@ public class SpringApplication {
 	 * @return a running {@link ApplicationContext}
 	 */
 	public ConfigurableApplicationContext run(String... args) {
+		if (this.registerShutdownHook) {
+			SpringApplication.shutdownHook.enableShutdowHookAddition();
+		}
 		long startTime = System.nanoTime();
 		DefaultBootstrapContext bootstrapContext = createBootstrapContext();
 		ConfigurableApplicationContext context = null;
@@ -569,8 +573,8 @@ public class SpringApplication {
 	}
 
 	/**
-	 * Apply any relevant post processing the {@link ApplicationContext}. Subclasses can
-	 * apply additional processing as required.
+	 * Apply any relevant post-processing to the {@link ApplicationContext}. Subclasses
+	 * can apply additional processing as required.
 	 * @param context the application context
 	 */
 	protected void postProcessApplicationContext(ConfigurableApplicationContext context) {
@@ -1457,10 +1461,10 @@ public class SpringApplication {
 		 */
 		public SpringApplication.Running run(String... args) {
 			RunListener runListener = new RunListener();
-			SpringApplicationHook hook = (springApplication) -> {
+			SpringApplicationHook hook = new SingleUseSpringApplicationHook((springApplication) -> {
 				springApplication.addPrimarySources(this.sources);
 				return runListener;
-			};
+			});
 			withHook(hook, () -> this.main.accept(args));
 			return runListener;
 		}
@@ -1576,6 +1580,23 @@ public class SpringApplication {
 		 */
 		public ConfigurableApplicationContext getApplicationContext() {
 			return this.applicationContext;
+		}
+
+	}
+
+	private static final class SingleUseSpringApplicationHook implements SpringApplicationHook {
+
+		private final AtomicBoolean used = new AtomicBoolean();
+
+		private final SpringApplicationHook delegate;
+
+		private SingleUseSpringApplicationHook(SpringApplicationHook delegate) {
+			this.delegate = delegate;
+		}
+
+		@Override
+		public SpringApplicationRunListener getRunListener(SpringApplication springApplication) {
+			return this.used.compareAndSet(false, true) ? this.delegate.getRunListener(springApplication) : null;
 		}
 
 	}
